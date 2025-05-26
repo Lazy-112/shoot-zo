@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>لعبة شتقن وزومبي - تصميم محسّن</title>
+<style>
+  body {
+    margin: 0;
+    background: #222;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+    color: white;
+    user-select: none;
+  }
+  canvas {
+    display: block;
+    margin: auto;
+    background: #87ceeb; /* لون السماء */
+    border: 2px solid #555;
+  }
+  #score {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    font-size: 20px;
+    font-weight: bold;
+    color: #ffd700;
+  }
+</style>
+</head>
+<body>
+<div id="score">الزومبي المقتولين: 0</div>
+<canvas id="game" width="600" height="400"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+
+const groundHeight = 60;
+
+const player = {
+  x: 50,
+  y: HEIGHT - groundHeight - 40,
+  width: 40,
+  height: 40,
+  dy: 0,
+  gravity: 0.2,
+  lift: -5,
+  color: 'lightblue',
+};
+
+let isFlying = false;
+const bullets = [];
+const zombies = [];
+const obstacles = [];
+const speed = 2;
+
+let killedZombies = 0;
+const winCount = 30;
+
+function spawnZombie() {
+  zombies.push({
+    x: WIDTH + 50,
+    y: HEIGHT - groundHeight - 50,
+    width: 40,
+    height: 50,
+    dx: -speed,
+    alive: true,
+  });
+}
+
+function spawnObstacle() {
+  obstacles.push({
+    x: WIDTH + 50,
+    y: HEIGHT - groundHeight - 30,
+    width: 60,
+    height: 30,
+    dx: -speed,
+  });
+  obstacles.push({
+    x: WIDTH + 200,
+    y: HEIGHT - groundHeight - 30,
+    width: 60,
+    height: 30,
+    dx: -speed,
+  });
+}
+
+function drawGround() {
+  ctx.fillStyle = '#654321'; // لون الأرض بني غامق
+  ctx.fillRect(0, HEIGHT - groundHeight, WIDTH, groundHeight);
+
+  // بعض الحصى (دوائر صغيرة)
+  for(let i=0; i<WIDTH; i+=30) {
+    ctx.beginPath();
+    ctx.fillStyle = '#8B7D7B';
+    ctx.arc(i+10, HEIGHT - groundHeight + 10, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawPlayer() {
+  // جسم اللاعب (مربع أزرق فاتح)
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+
+  // رسم الرأس (دائرة)
+  ctx.beginPath();
+  ctx.fillStyle = '#ffe0bd';
+  ctx.arc(player.x + player.width/2, player.y - 10, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // رسم السلاح (شتقن) كمسطرة سوداء مع تفاصيل بسيطة
+  ctx.fillStyle = 'black';
+  ctx.fillRect(player.x + player.width, player.y + player.height/2 - 5, 40, 10);
+  ctx.fillStyle = 'gray';
+  ctx.fillRect(player.x + player.width + 35, player.y + player.height/2 - 3, 10, 6);
+}
+
+function drawZombie(z) {
+  // جسم الزومبي - أخضر غامق
+  ctx.fillStyle = '#006400';
+  ctx.fillRect(z.x, z.y, z.width, z.height);
+
+  // رأس الزومبي - أخضر فاتح
+  ctx.fillStyle = '#32CD32';
+  ctx.beginPath();
+  ctx.arc(z.x + z.width/2, z.y - 10, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // عينين باللون الأبيض
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(z.x + 10, z.y - 12, 4, 0, Math.PI * 2);
+  ctx.arc(z.x + 30, z.y - 12, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // بؤبؤ باللون الأسود
+  ctx.fillStyle = 'black';
+  ctx.beginPath();
+  ctx.arc(z.x + 10, z.y - 12, 2, 0, Math.PI * 2);
+  ctx.arc(z.x + 30, z.y - 12, 2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawObstacle(ob) {
+  // شكل الحجر أو صندوق بسيط
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
+
+  // خطوط بسيطة لإضافة تفاصيل
+  ctx.strokeStyle = '#5C3317';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(ob.x + 10, ob.y);
+  ctx.lineTo(ob.x + 10, ob.y + ob.height);
+  ctx.moveTo(ob.x + 30, ob.y);
+  ctx.lineTo(ob.x + 30, ob.y + ob.height);
+  ctx.stroke();
+}
+
+function drawBullet(b) {
+  ctx.fillStyle = b.color;
+  ctx.fillRect(b.x, b.y, b.width, b.height);
+}
+
+function shoot() {
+  bullets.push({
+    x: player.x + player.width + 35,  // من نهاية السلاح تقريباً
+    y: player.y + player.height / 2 - 2,
+    width: 20,
+    height: 8,
+    dx: 5,
+    traveled: 0,
+    maxDistance: 250,
+    color: 'yellow',
+  });
+}
+
+function update() {
+  if (isFlying) {
+    if (player.dy > -3) {
+      player.dy += player.lift * 0.1;
+    }
+  }
+
+  if (!isFlying && player.dy > 2) {
+    player.dy *= 0.98;
+  }
+
+  player.dy += player.gravity;
+  player.y += player.dy;
+
+  if (player.y + player.height > HEIGHT - groundHeight) {
+    player.y = HEIGHT - groundHeight - player.height;
+    player.dy *= -0.2;
+    if (Math.abs(player.dy) < 1) player.dy = 0;
+  }
+
+  if (player.y < 0) {
+    player.y = 0;
+    player.dy = 0;
+  }
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.dx;
+    b.traveled += b.dx;
+    if (b.x > WIDTH || b.traveled > b.maxDistance) {
+      bullets.splice(i, 1);
+      continue;
+    }
+  }
+
+  for (let i = zombies.length - 1; i >= 0; i--) {
+    const z = zombies[i];
+    if (!z.alive) {
+      zombies.splice(i, 1);
+      continue;
+    }
+    z.x += z.dx;
+
+    if (
+      player.x < z.x + z.width &&
+      player.x + player.width > z.x &&
+      player.y < z.y + z.height &&
+      player.y + player.height > z.y
+    ) {
+      alert('انتهت اللعبة! الزومبي وصلك.');
+      window.location.reload();
+    }
+
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const b = bullets[j];
+      if (
+        b.x < z.x + z.width &&
+        b.x + b.width > z.x &&
+        b.y < z.y + z.height &&
+        b.y + b.height > z.y
+      ) {
+        z.alive = false;
+        bullets.splice(j, 1);
+        killedZombies++;
+        updateScore();
+
+        if (killedZombies >= winCount) {
+          alert('مبروك! فزت باللعبة بقتل 30 زومبي!');
+          window.location.reload();
+        }
+        break;
+      }
+    }
+
+    if (z.x + z.width < 0) zombies.splice(i, 1);
+  }
+
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const ob = obstacles[i];
+    ob.x += ob.dx;
+
+    if (
+      player.x < ob.x + ob.width &&
+      player.x + player.width > ob.x &&
+      player.y < ob.y + ob.height &&
+      player.y + player.height > ob.y
+    ) {
+      alert('اصدمت بالعقبة! انتهت اللعبة.');
+      window.location.reload();
+    }
+
+    if (ob.x + ob.width < 0) obstacles.splice(i, 1);
+  }
+}
+
+function draw() {
+  // رسم السماء (خلفية الكانفس بال CSS)
+  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+  drawGround();
+
+  drawPlayer();
+
+  bullets.forEach(drawBullet);
+  zombies.forEach(drawZombie);
+  obstacles.forEach(drawObstacle);
+}
+
+function updateScore() {
+  document.getElementById('score').textContent = `الزومبي المقتولين: ${killedZombies}`;
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    if (!isFlying) shoot();
+    isFlying = true;
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    isFlying = false;
+  }
+});
+
+let frameCount = 0;
+function gameLoop() {
+  frameCount++;
+  if (frameCount % 100 === 0) spawnZombie();
+  if (frameCount % 160 === 0) spawnObstacle();
+
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
